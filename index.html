@@ -49,7 +49,6 @@
             <h1 class="text-3xl md:text-4xl font-bold text-green-700">
                 <i class="fa-solid fa-seedling mr-2"></i>智能窗台盆栽守護系統
             </h1>
-            <p class="text-green-600 font-medium text-lg">2026 綠色科技創意大賽 —— 綠建宜居</p>
         </header>
 
         <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -89,6 +88,9 @@
                         </div>
                         <h3 class="text-2xl font-bold" id="window-status-text">窗戶打開</h3>
                         <p class="text-sm text-gray-500 mt-2" id="auto-message">盆栽正在室外吸收陽光</p>
+                    </div>
+                    <div class="mt-2 pt-4 border-t border-gray-100 text-center">
+                        <p class="text-sm text-gray-600 font-bold">累積開關次數：<span id="toggle-count" class="text-green-600 text-lg">0</span></p>
                     </div>
                 </div>
             </div>
@@ -164,11 +166,8 @@
                         <h2 class="text-xl font-bold mb-4 text-blue-800 flex items-center">
                             <i class="fa-brands fa-usb mr-2"></i>實體 Micro:bit 連線 (USB)
                         </h2>
-                        <div class="flex flex-col md:flex-row gap-4 items-center justify-between">
-                            <p class="text-sm text-gray-600 flex-1">
-                                支援 USB 雙向通訊。在 MakeCode 中使用 <code>serial write value "water" = (analog read pin P1)</code> 傳送感測值。同時使用 <code>serial read line</code> 接收網頁發出的 <strong>"pressopen"</strong> 或 <strong>"pressclose"</strong> 遙控指令。
-                            </p>
-                            <div class="flex flex-col items-center min-w-[150px]">
+                        <div class="flex flex-col gap-4 items-center justify-center">
+                            <div class="flex flex-col items-center min-w-[200px]">
                                 <button id="connect-btn" class="w-full py-2 bg-blue-500 hover:bg-blue-600 text-white font-bold rounded-lg transition shadow-md">
                                     連接 Micro:bit
                                 </button>
@@ -190,7 +189,8 @@
             p1Rain: 0,              // 0 to 1023
             p2Soil: 800,            // 0 to 1023
             rainDrops: [],          // Particle system for canvas
-            isAutoClosed: false     // Flag to know if closed by sensor
+            isAutoClosed: false,    // Flag to know if closed by sensor
+            toggleCount: 0          // Action counter
         };
 
         // --- Fetch HKO API ---
@@ -227,20 +227,34 @@
 
         // --- Logic & Controls ---
         function setWindow(action, isManual = false) {
+            let stateChanged = false;
+            
             if (action === 'OPEN') {
                 // Prevent opening if it's currently raining heavily
                 if (state.p1Rain > 400 && isManual) {
                     showUIMessage("⚠️ 目前雨勢過大，基於安全無法手動開窗！", "error");
                     return;
                 }
+                if (!state.windowOpen) {
+                    stateChanged = true;
+                    state.toggleCount++;
+                }
                 state.windowOpen = true;
                 state.isAutoClosed = false;
                 updateUI();
                 if (isManual) sendSerialData("pressopen"); // 發送打開指令至 Micro:bit
             } else {
+                if (state.windowOpen) {
+                    stateChanged = true;
+                    state.toggleCount++;
+                }
                 state.windowOpen = false;
                 updateUI();
                 if (isManual) sendSerialData("pressclose"); // 發送關閉指令至 Micro:bit
+            }
+            
+            if (stateChanged) {
+                document.getElementById('toggle-count').innerText = state.toggleCount;
             }
         }
 
@@ -432,6 +446,19 @@
                     if (!isNaN(val)) {
                         document.getElementById('slider-p1').value = val; // 更新滑桿位置
                         updateSensors(); // 同步觸發判斷邏輯與 Canvas 動畫
+                    }
+                }
+                return; // 處理完畢後返回
+            }
+
+            // 解析土壤濕度的格式 (例如: "soil:800")
+            if (data.startsWith("soil:")) {
+                const parts = data.split(":");
+                if (parts.length === 2) {
+                    const val = parseInt(parts[1].trim());
+                    if (!isNaN(val)) {
+                        document.getElementById('slider-p2').value = val; // 更新土壤濕度滑桿
+                        updateSensors(); // 同步更新畫面顯示
                     }
                 }
                 return; // 處理完畢後返回
