@@ -125,6 +125,11 @@
                                 <i class="fa-solid fa-arrow-right-to-bracket mr-2"></i> 關閉窗戶 (盆栽收回)
                             </button>
                         </div>
+                        
+                        <!-- Pump Control Button -->
+                        <button id="pump-btn" onclick="togglePump()" class="w-full mt-3 py-3 bg-cyan-500 hover:bg-cyan-600 text-white font-bold rounded-lg transition shadow-md flex justify-center items-center">
+                            <i class="fa-solid fa-droplet mr-2"></i> 開啟澆水模式
+                        </button>
                     </div>
 
                     <!-- Sensor Simulators -->
@@ -166,7 +171,10 @@
                         <h2 class="text-xl font-bold mb-4 text-blue-800 flex items-center">
                             <i class="fa-brands fa-usb mr-2"></i>實體 Micro:bit 連線 (USB)
                         </h2>
-                        <div class="flex flex-col gap-4 items-center justify-center">
+                        <div class="flex flex-col md:flex-row gap-4 items-center justify-between">
+                            <p class="text-sm text-gray-600 flex-1">
+                                支援 USB 雙向通訊。在 MakeCode 中使用 <code>serial write value</code> 傳送感測值。同時使用 <code>serial read line</code> 接收網頁發出的 <strong>"pressopen"</strong>、<strong>"pressclose"</strong> 遙控窗戶指令，或 <strong>"pumpON"</strong>、<strong>"pumpOFF"</strong> 啟動/停止水泵。
+                            </p>
                             <div class="flex flex-col items-center min-w-[200px]">
                                 <button id="connect-btn" class="w-full py-2 bg-blue-500 hover:bg-blue-600 text-white font-bold rounded-lg transition shadow-md">
                                     連接 Micro:bit
@@ -189,8 +197,10 @@
             p1Rain: 0,              // 0 to 1023
             p2Soil: 800,            // 0 to 1023
             rainDrops: [],          // Particle system for canvas
+            pumpDrops: [],          // Particle system for watering
             isAutoClosed: false,    // Flag to know if closed by sensor
-            toggleCount: 0          // Action counter
+            toggleCount: 0,         // Action counter
+            pumpOn: false           // Pump status
         };
 
         // --- Fetch HKO API ---
@@ -255,6 +265,26 @@
             
             if (stateChanged) {
                 document.getElementById('toggle-count').innerText = state.toggleCount;
+            }
+        }
+
+        // --- Toggle Pump Function ---
+        function togglePump() {
+            state.pumpOn = !state.pumpOn;
+            const btn = document.getElementById('pump-btn');
+            
+            if (state.pumpOn) {
+                // 澆水中狀態 UI
+                btn.className = "w-full mt-3 py-3 bg-cyan-700 hover:bg-cyan-800 text-white font-bold rounded-lg transition shadow-md flex justify-center items-center";
+                btn.innerHTML = '<i class="fa-solid fa-droplet-slash mr-2"></i> 停止澆水';
+                sendSerialData("pumpON"); // 發送開啟水泵指令至 Micro:bit
+                showUIMessage("💧 水泵已啟動，正在為盆栽澆水！", "success");
+            } else {
+                // 停止澆水狀態 UI
+                btn.className = "w-full mt-3 py-3 bg-cyan-500 hover:bg-cyan-600 text-white font-bold rounded-lg transition shadow-md flex justify-center items-center";
+                btn.innerHTML = '<i class="fa-solid fa-droplet mr-2"></i> 開啟澆水模式';
+                sendSerialData("pumpOFF"); // 發送停止水泵指令至 Micro:bit
+                showUIMessage("🛑 水泵已關閉，停止澆水。", "warning");
             }
         }
 
@@ -506,6 +536,17 @@
         }
         initRainDrops();
 
+        function initPumpDrops() {
+            for(let i=0; i<30; i++) {
+                state.pumpDrops.push({
+                    x: (Math.random() - 0.5) * 40, // 隨機水平偏移
+                    y: Math.random() * -60,        // 隨機垂直起始點
+                    speed: 3 + Math.random() * 4   // 水滴下落速度
+                });
+            }
+        }
+        initPumpDrops();
+
         function drawScene() {
             if (!canvas.width || !canvas.height) return requestAnimationFrame(drawScene);
             const w = canvas.width;
@@ -599,6 +640,25 @@
                     if (drop.y > h) {
                         drop.y = -20;
                         drop.x = (w * 0.4) + Math.random() * (w * 0.8); // Respawn outside
+                    }
+                });
+            }
+
+            // 6. Draw Pump Watering Effect
+            if (state.pumpOn) {
+                ctx.fillStyle = "rgba(0, 180, 255, 0.8)";
+                state.pumpDrops.forEach(drop => {
+                    ctx.beginPath();
+                    // 根據盆栽目前位置 (plantX) 繪製水滴落下
+                    ctx.arc(plantX + drop.x, plantY - h*0.2 + drop.y, w*0.006, 0, Math.PI*2);
+                    ctx.fill();
+
+                    // 水滴往下掉
+                    drop.y += drop.speed;
+                    // 落入泥土後重置
+                    if (drop.y > h*0.1) {
+                        drop.y = Math.random() * -50;
+                        drop.x = (Math.random() - 0.5) * (w*0.08);
                     }
                 });
             }
