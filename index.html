@@ -166,7 +166,7 @@
                         </h2>
                         <div class="flex flex-col md:flex-row gap-4 items-center justify-between">
                             <p class="text-sm text-gray-600 flex-1">
-                                支援透過 USB 直接讀取 Micro:bit 的序列埠數據。請在 MakeCode 中使用 <code>serial write value "water" = (analog read pin P1)</code> 傳送感測值，或使用 <code>serial write line</code> 發送 <strong>"raining"</strong> / <strong>"OpenWindow"</strong>。
+                                支援 USB 雙向通訊。在 MakeCode 中使用 <code>serial write value "water" = (analog read pin P1)</code> 傳送感測值。同時使用 <code>serial read line</code> 接收網頁發出的 <strong>"pressopen"</strong> 或 <strong>"pressclose"</strong> 遙控指令。
                             </p>
                             <div class="flex flex-col items-center min-w-[150px]">
                                 <button id="connect-btn" class="w-full py-2 bg-blue-500 hover:bg-blue-600 text-white font-bold rounded-lg transition shadow-md">
@@ -236,9 +236,11 @@
                 state.windowOpen = true;
                 state.isAutoClosed = false;
                 updateUI();
+                if (isManual) sendSerialData("pressopen"); // 發送打開指令至 Micro:bit
             } else {
                 state.windowOpen = false;
                 updateUI();
+                if (isManual) sendSerialData("pressclose"); // 發送關閉指令至 Micro:bit
             }
         }
 
@@ -365,6 +367,25 @@
             } catch (err) {
                 console.error('Serial connection error:', err);
                 showUIMessage("連接被拒絕或發生錯誤", "error");
+            }
+        }
+
+        // 向 Micro:bit 發送數據的函數
+        async function sendSerialData(text) {
+            if (port && port.writable) {
+                const encoder = new TextEncoder();
+                const writer = port.writable.getWriter();
+                try {
+                    // 加入 \r\n 讓 Micro:bit 的 "serial read line" 可以正確識別行結尾
+                    await writer.write(encoder.encode(text + "\r\n"));
+                    console.log("已發送至 Micro:bit:", text);
+                } catch (err) {
+                    console.error("發送至序列埠失敗:", err);
+                } finally {
+                    writer.releaseLock();
+                }
+            } else {
+                console.log("無法發送指令：未連接 Micro:bit 或連接埠不可寫入");
             }
         }
 
