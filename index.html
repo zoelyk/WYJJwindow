@@ -47,7 +47,7 @@
         <!-- Header -->
         <header class="text-center space-y-2 mb-8">
             <h1 class="text-3xl md:text-4xl font-bold text-green-700">
-                <i class="fa-solid fa-seedling mr-2"></i>智能窗台盆栽守護系統11
+                <i class="fa-solid fa-seedling mr-2"></i>智能窗台盆栽守護系統
             </h1>
         </header>
 
@@ -171,7 +171,10 @@
                         <h2 class="text-xl font-bold mb-4 text-blue-800 flex items-center">
                             <i class="fa-brands fa-usb mr-2"></i>實體 Micro:bit 連線 (USB)
                         </h2>
-                        <div class="flex flex-col gap-4 items-center justify-center">
+                        <div class="flex flex-col md:flex-row gap-4 items-center justify-between">
+                            <p class="text-sm text-gray-600 flex-1">
+                                支援 USB 雙向通訊。在 MakeCode 中使用 <code>serial write value</code> 傳送感測值。同時使用 <code>serial read line</code> 接收網頁發出的 <strong>"pressopen"</strong>、<strong>"pressclose"</strong> 遙控窗戶指令，或 <strong>"pumpON"</strong>、<strong>"pumpOFF"</strong> 啟動/停止水泵。
+                            </p>
                             <div class="flex flex-col items-center min-w-[200px]">
                                 <button id="connect-btn" class="w-full py-2 bg-blue-500 hover:bg-blue-600 text-white font-bold rounded-lg transition shadow-md">
                                     連接 Micro:bit
@@ -446,4 +449,228 @@
                         if (done) break;
                         if (value) {
                             buffer += value;
-                            let lines = buffer.
+                            let lines = buffer.split(/\r?\n/);
+                            buffer = lines.pop(); // 保留不完整的字串
+                            for (let line of lines) {
+                                processMicrobitData(line.trim());
+                            }
+                        }
+                    }
+                } catch (error) {
+                    console.error("讀取錯誤:", error);
+                } finally {
+                    reader.releaseLock();
+                }
+            }
+        }
+
+        function processMicrobitData(data) {
+            if (!data) return;
+            console.log("從 Micro:bit 收到訊息:", data);
+            
+            // 解析 MakeCode "serial write value" 的格式 (例如: "water:450")
+            if (data.startsWith("water:")) {
+                const parts = data.split(":");
+                if (parts.length === 2) {
+                    const val = parseInt(parts[1].trim());
+                    if (!isNaN(val)) {
+                        document.getElementById('slider-p1').value = val; // 更新滑桿位置
+                        updateSensors(); // 同步觸發判斷邏輯與 Canvas 動畫
+                    }
+                }
+                return; // 處理完畢後返回
+            }
+
+            // 解析土壤濕度的格式 (例如: "soil:800")
+            if (data.startsWith("soil:")) {
+                const parts = data.split(":");
+                if (parts.length === 2) {
+                    const val = parseInt(parts[1].trim());
+                    if (!isNaN(val)) {
+                        document.getElementById('slider-p2').value = val; // 更新土壤濕度滑桿
+                        updateSensors(); // 同步更新畫面顯示
+                    }
+                }
+                return; // 處理完畢後返回
+            }
+
+            if (data === "raining") {
+                // 收到 raining，將模擬水位拉到最高並關窗
+                document.getElementById('slider-p1').value = 1023; 
+                updateSensors(); // 觸發自動關窗與 Canvas 動畫
+                showUIMessage("📡 收到訊號：下雨中，自動關窗！", "warning");
+            } else if (data === "OpenWindow") {
+                // 收到 OpenWindow，打開窗戶
+                document.getElementById('slider-p1').value = 0; // 重置雨水
+                updateSensors();
+                setWindow('OPEN', true);
+                showUIMessage("📡 收到訊號：打開窗戶！", "success");
+            } else if (data === "CloseWindow") {
+                // 額外支援 CloseWindow 字眼，以備不時之需
+                setWindow('CLOSE', true);
+                showUIMessage("📡 收到訊號：關閉窗戶！", "warning");
+            }
+        }
+
+        // --- Canvas Animation System ---
+        const canvas = document.getElementById('simCanvas');
+        const ctx = canvas.getContext('2d');
+
+        function resizeCanvas() {
+            canvas.width = canvas.parentElement.clientWidth;
+            canvas.height = canvas.parentElement.clientHeight;
+        }
+        window.addEventListener('resize', resizeCanvas);
+        // Initial setup
+        setTimeout(resizeCanvas, 100); 
+
+        function initRainDrops() {
+            for(let i=0; i<100; i++) {
+                state.rainDrops.push({
+                    x: Math.random() * 2000,
+                    y: Math.random() * -1000,
+                    speed: 5 + Math.random() * 10,
+                    length: 10 + Math.random() * 20
+                });
+            }
+        }
+        initRainDrops();
+
+        function initPumpDrops() {
+            for(let i=0; i<30; i++) {
+                state.pumpDrops.push({
+                    x: (Math.random() - 0.5) * 40, // 隨機水平偏移
+                    y: Math.random() * -60,        // 隨機垂直起始點
+                    speed: 3 + Math.random() * 4   // 水滴下落速度
+                });
+            }
+        }
+        initPumpDrops();
+
+        function drawScene() {
+            if (!canvas.width || !canvas.height) return requestAnimationFrame(drawScene);
+            const w = canvas.width;
+            const h = canvas.height;
+
+            // 1. Draw Background
+            // Left: Indoor Wall
+            ctx.fillStyle = "#fdfbf7";
+            ctx.fillRect(0, 0, w * 0.4, h);
+            // Right: Outdoor Sky
+            let skyColor = state.p1Rain > 100 ? "#8aa2b3" : "#87CEEB"; // Darken sky if raining
+            ctx.fillStyle = skyColor;
+            ctx.fillRect(w * 0.4, 0, w * 0.6, h);
+
+            // Wall shading
+            ctx.fillStyle = "rgba(0,0,0,0.05)";
+            ctx.fillRect(w * 0.35, 0, w * 0.05, h);
+
+            // Windowsill (Platform)
+            const sillY = h * 0.7;
+            ctx.fillStyle = "#8b5a2b"; // Wood color
+            ctx.fillRect(w * 0.2, sillY, w * 0.6, h * 0.05);
+
+            // 2. Animate Window Position
+            const targetAnim = state.windowOpen ? 1.0 : 0.0;
+            state.windowAnimProgress += (targetAnim - state.windowAnimProgress) * 0.1; // Smooth easing
+
+            // 3. Draw Plant (Position depends on windowAnimProgress)
+            // 0.0 = Indoor (x: 0.3), 1.0 = Outdoor (x: 0.6)
+            const plantX = w * (0.3 + (state.windowAnimProgress * 0.3));
+            const plantY = sillY;
+
+            // Pot
+            ctx.fillStyle = "#d2691e";
+            ctx.beginPath();
+            ctx.moveTo(plantX - w*0.04, plantY);
+            ctx.lineTo(plantX + w*0.04, plantY);
+            ctx.lineTo(plantX + w*0.03, plantY - h*0.1);
+            ctx.lineTo(plantX - w*0.03, plantY - h*0.1);
+            ctx.fill();
+
+            // Soil color based on P2
+            ctx.fillStyle = state.p2Soil < 300 ? "#c2b280" : "#3e2723"; // Dry vs wet
+            ctx.fillRect(plantX - w*0.03, plantY - h*0.1, w*0.06, h*0.015);
+
+            // Leaves
+            ctx.fillStyle = "#228b22";
+            ctx.beginPath();
+            ctx.arc(plantX, plantY - h*0.15, w*0.05, 0, Math.PI*2);
+            ctx.arc(plantX - w*0.03, plantY - h*0.12, w*0.04, 0, Math.PI*2);
+            ctx.arc(plantX + w*0.03, plantY - h*0.12, w*0.04, 0, Math.PI*2);
+            ctx.fill();
+
+            // 4. Draw Window (Sliding Window Mechanism)
+            // Left fixed frame
+            ctx.fillStyle = "#ddd";
+            ctx.fillRect(w * 0.4, h * 0.1, w * 0.02, h * 0.6);
+            
+            // Sliding glass panel
+            // Moves left to close (x: 0.42), right to open (x: 0.6)
+            const glassX = w * (0.42 + (state.windowAnimProgress * 0.18));
+            
+            ctx.fillStyle = "rgba(200, 220, 255, 0.4)";
+            ctx.strokeStyle = "#ccc";
+            ctx.lineWidth = 4;
+            ctx.beginPath();
+            ctx.rect(glassX, h * 0.1, w * 0.18, h * 0.6);
+            ctx.fill();
+            ctx.stroke();
+
+            // 5. Draw Rain Effect (Only Outdoor, right of the window)
+            if (state.p1Rain > 50) {
+                const rainIntensity = state.p1Rain / 1023; // 0.0 to 1.0
+                ctx.strokeStyle = "rgba(174, 194, 224, 0.6)";
+                ctx.lineWidth = 2;
+                
+                state.rainDrops.forEach(drop => {
+                    // Only draw if outside the indoor area (x > 0.4)
+                    if (drop.x > w * 0.4) {
+                        ctx.beginPath();
+                        ctx.moveTo(drop.x, drop.y);
+                        ctx.lineTo(drop.x - drop.speed*0.5, drop.y + drop.length);
+                        ctx.stroke();
+                    }
+
+                    // Update position
+                    drop.y += drop.speed * rainIntensity * 3;
+                    drop.x -= drop.speed * 0.5 * rainIntensity * 3;
+
+                    // Reset drop
+                    if (drop.y > h) {
+                        drop.y = -20;
+                        drop.x = (w * 0.4) + Math.random() * (w * 0.8); // Respawn outside
+                    }
+                });
+            }
+
+            // 6. Draw Pump Watering Effect
+            if (state.pumpOn) {
+                ctx.fillStyle = "rgba(0, 180, 255, 0.8)";
+                state.pumpDrops.forEach(drop => {
+                    ctx.beginPath();
+                    // 根據盆栽目前位置 (plantX) 繪製水滴落下
+                    ctx.arc(plantX + drop.x, plantY - h*0.2 + drop.y, w*0.006, 0, Math.PI*2);
+                    ctx.fill();
+
+                    // 水滴往下掉
+                    drop.y += drop.speed;
+                    // 落入泥土後重置
+                    if (drop.y > h*0.1) {
+                        drop.y = Math.random() * -50;
+                        drop.x = (Math.random() - 0.5) * (w*0.08);
+                    }
+                });
+            }
+
+            requestAnimationFrame(drawScene);
+        }
+
+        // Start Animation Loop
+        requestAnimationFrame(drawScene);
+        updateUI(); // Init UI text
+        updateSensors(); // Init sensor values
+
+    </script>
+</body>
+</html>
